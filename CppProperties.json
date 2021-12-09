@@ -6,8 +6,6 @@
       ],
       "name": "Mingw32",
       "includePath": [
-        //"${workspaceRoot}\\..\\..\\..\\..\\..\\MinGW\\lib\\gcc\\mingw32\\6.3.0\\include\\c++",
-        //"C:\\MinGW\\lib\\gcc\\mingw32\\6.3.0\\include\\c++",
         "C:\\MinGW\\include",
         "C:\\MinGW\\lib",
         "C:\\MinGW\\bin",
