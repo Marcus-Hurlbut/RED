@@ -1,0 +1,29 @@
+{
+  "configurations": [
+    {
+      "inheritEnvironments": [
+        "mingw32"
+      ],
+      "name": "Mingw32",
+      "includePath": [
+        //"${workspaceRoot}\\..\\..\\..\\..\\..\\MinGW\\lib\\gcc\\mingw32\\6.3.0\\include\\c++",
+        //"C:\\MinGW\\lib\\gcc\\mingw32\\6.3.0\\include\\c++",
+        "C:\\MinGW\\include",
+        "C:\\MinGW\\lib",
+        "C:\\MinGW\\bin",
+        "C:\\MinGW\\include\\SDL2",
+        "C:\\MinGW\\mingw32",
+        "${workspaceRoot}\\**",
+        "H:\\Source_Libraries\\Vulkan\\Include\\vulkan",
+        "C:\\Users\\Thugs4Less\\Desktop\\Program Projects\\Vulkan"
+      ],
+      "defines": [
+        "WIN32",
+        "_DEBUG",
+        "UNICODE",
+        "_UNICODE"
+      ],
+      "intelliSenseMode": "windows-msvc-x86"
+    }
+  ]
+}
