@@ -1,23 +1,49 @@
+// Marcus Hurlbut - Vulkan Renderer
+
 #include "Renderer.h"
 
+
+// Constructor & Deconstructors
 Renderer::Renderer()
 {
-	initWindow();
-	initInstance();
-	initDebug();
-	setupDevice();
-	initDevice();
+	initVulkan();
 }
 
 Renderer::~Renderer()
 {
-	deleteDevice();
-	deleteDebug();
-	deleteInstance();
-	deleteWindow();
+	deInitVulkan();
 }
 
-void Renderer::initWindow()
+// Initializers & Deinitializers
+void Renderer::initVulkan()
+{
+	createSDLWindow();
+	createInstance();
+	createDebug();
+	setupDevice();
+	createDevice();
+}
+
+void Renderer::deInitVulkan()
+{
+	// Destroy device
+	vkDestroyDevice(device, nullptr);
+	device = VK_NULL_HANDLE;
+
+	// Destroy Debugger Report
+	//fvkDestroyDebugReportCallbackEXT(instance, debug_report, nullptr);
+	debug_report = VK_NULL_HANDLE;
+
+	// Destroy Instance
+	vkDestroyInstance(instance, nullptr);
+	instance = nullptr;
+
+	// Destroy SDL Window
+	SDL_DestroyWindow(window);
+}
+
+// SDL Window Initializaiton and Creation
+void Renderer::createSDLWindow()
 {
 	// Initialize SDL 
 	SDL_Init(SDL_INIT_VIDEO);
@@ -31,22 +57,17 @@ void Renderer::initWindow()
 	}
 }
 
-void Renderer::deleteWindow()
-{
-	SDL_DestroyWindow(window);
-}
-
 
 // Create a Vulkan Instance
-void Renderer::initInstance()
+void Renderer::createInstance()
 {
-	// Extend SDL window interface to Vulkan
+	// Extend SDL extensions to Vulkan
 	uint32_t extension_count = 0;
 	SDL_Vulkan_GetInstanceExtensions(window, &extension_count, nullptr);
-	instance_extensions.resize(extension_count);
-	SDL_Vulkan_GetInstanceExtensions(window, &extension_count, instance_extensions.data());
+	SDL_extensions.resize(extension_count);
+	SDL_Vulkan_GetInstanceExtensions(window, &extension_count, SDL_extensions.data());
 
-	// Application Information
+	// Set Application Info
 	VkApplicationInfo application {};
 	application.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
 	application.pApplicationName = "Vulkan Renderer Prototype";
@@ -54,26 +75,49 @@ void Renderer::initInstance()
 	application.applicationVersion = VK_MAKE_VERSION(0, 1, 0);
 	application.pEngineName = "No Engine";
 
-	// Instantiate Vulkan from app info
+	// Instantiate Vulkan from Application Info and SDL Extensions
 	VkInstanceCreateInfo instance_create {};
 	instance_create.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 	instance_create.pApplicationInfo = &application;
 	instance_create.enabledLayerCount = layers.size();
 	instance_create.ppEnabledLayerNames = layers.data();
-	instance_create.enabledExtensionCount = instance_extensions.size();
-	instance_create.ppEnabledExtensionNames = instance_extensions.data();
-	//instance_create.pNext = &debug_callback;
+	instance_create.enabledExtensionCount = SDL_extensions.size();
+	instance_create.ppEnabledExtensionNames = SDL_extensions.data();
 
-	errorHandler(vkCreateInstance(&instance_create, nullptr, &instance));
+	// Instance Error Handling
+	if (errorHandler(vkCreateInstance(&instance_create, nullptr, &instance)) != VK_SUCCESS)
+	{
+		throw std::runtime_error("[!] Failed to Create a Vulkan Instance.");
+	}
+
+	// Check Instance Extensions support
+	uint32_t instance_extension_count = 0;
+	vkEnumerateInstanceExtensionProperties(nullptr, &instance_extension_count, nullptr);
+	std::vector <VkExtensionProperties> extensions(instance_extension_count);
+	vkEnumerateInstanceExtensionProperties(nullptr, &instance_extension_count, extensions.data());
+
+	// Print Supported Instance Extensions
+	std::cout << "\nInstance Extensions:\n";
+	for (const auto& extension : extensions)
+	{
+		std::cout << '\t' << extension.extensionName << '\n';
+	}
+
+	// Check Instance Layer Properties
+	uint32_t layer_count = 0;
+	vkEnumerateInstanceLayerProperties(&layer_count, nullptr);
+	std::vector<VkLayerProperties> layer_properties(layer_count);
+	vkEnumerateInstanceLayerProperties(&layer_count, layer_properties.data());
+
+	// Print all Instance Layers
+	std::cout << "Instance Layers:\n";
+	for (auto& i : layer_properties)
+	{
+		std::cout << "\n " << i.layerName << "\t\t | " << i.description;
+	};
 }
 
 
-// Destroy Vulkan Instance
-void Renderer::deleteInstance()
-{
-	vkDestroyInstance(instance, nullptr);
-	instance = nullptr;
-}
 
 // Setup physical device & queue families for initialization
 void Renderer::setupDevice()
@@ -110,18 +154,12 @@ void Renderer::setupDevice()
 		}
 	}
 
+	// Error Handling for Queue Family
 	if (!found)
 	{
 		assert(1 && "[!] Vulkan Error: Queue family for supporting graphics not found.");
 		std::exit(-1);
 	}
-
-	// Enumerate Instance Layer Properties
-	uint32_t instance_layer_count = 0;
-	std::vector<VkLayerProperties> instance_layer_properties;
-	vkEnumerateInstanceLayerProperties(&instance_layer_count, nullptr);
-	instance_layer_properties.resize(instance_layer_count);
-	vkEnumerateInstanceLayerProperties(&instance_layer_count, instance_layer_properties.data());
 
 	// Enumerate Device Layer Properties
 	uint32_t device_layer_count = 0;
@@ -130,15 +168,9 @@ void Renderer::setupDevice()
 	device_layer_properties.resize(device_layer_count);
 	vkEnumerateDeviceLayerProperties(gpu, &device_layer_count, device_layer_properties.data());
 
-	// Print all Instance Layers
-	std::cout << "Instance Layers:\n";
-	for (auto& i : instance_layer_properties)
-	{
-		std::cout << "\n " << i.layerName << "\t\t | " << i.description;
-	};
 
 	// Print all Device Layers
-	std::cout << "Device Layers:\n";
+	std::cout << "\nDevice Layers:\n";
 	for (auto& i : device_layer_properties)
 	{
 		std::cout << "\n " << i.layerName << "\t\t | " << i.description;
@@ -147,13 +179,12 @@ void Renderer::setupDevice()
 
 
 // Initialize Vulkan Device
-void Renderer::initDevice()
+void Renderer::createDevice()
 {
 	float queue_priorities[]{ 1.0f };
 
 	// Allocate Device Queue from Queue Family
 	VkDeviceQueueCreateInfo device_queue_create_info {};
-
 	device_queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 	device_queue_create_info.queueFamilyIndex = graphics_family_index;
 	device_queue_create_info.queueCount = 1;
@@ -161,7 +192,6 @@ void Renderer::initDevice()
 
 	// Create Device Info
 	VkDeviceCreateInfo device_create_info{};
-
 	device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 	device_create_info.queueCreateInfoCount = 1;
 	device_create_info.pQueueCreateInfos = &device_queue_create_info;
@@ -170,31 +200,37 @@ void Renderer::initDevice()
 	device_create_info.enabledExtensionCount = device_extensions.size();
 	device_create_info.ppEnabledExtensionNames = device_extensions.data();
 
-	errorHandler(vkCreateDevice(gpu, &device_create_info, nullptr, &device));
-
+	result = errorHandler(vkCreateDevice(gpu, &device_create_info, nullptr, &device));
+	if (result != VK_SUCCESS)
+	{
+		throw std::runtime_error("\n[!] Failed to Create Vulkan Device");
+	}
 }
 
-// Destroy Vulkan Device 
-void Renderer::deleteDevice()
-{
-	vkDestroyDevice(device, nullptr);
-	device = VK_NULL_HANDLE;
-}
 
 // Vulkan Debug Callback Function
-static VKAPI_ATTR VkBool32 VKAPI_CALL VulkanDebugCallback(VkDebugReportFlagsEXT flags, VkDebugReportObjectTypeEXT obj_type, uint64_t src_obj,
-													size_t loc, int32_t msg_code, const char* layer_prefix, const char* msg, void* user_data)
+static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) 
 {
-	std::cout << msg << std::endl;
-	return false;
+	std::cerr << "validation layer: " << pCallbackData->pMessage << std::endl;
+	return VK_FALSE;
 }
 
 
 // Set up Debugger pointer
 PFN_vkCreateDebugReportCallbackEXT fvkCreateDebugReportCallbackEXT = nullptr;		// Debugger report create ptr
 
+VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger) 
+{
+	auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
+	if (func != nullptr) 
+	{
+		return func(instance, pCreateInfo, pAllocator, pDebugMessenger);
+	}
+	return VK_ERROR_EXTENSION_NOT_PRESENT;
+}
+
 // Initialize Debugger
-void Renderer::initDebug()
+void Renderer::createDebug()
 {
 	fvkCreateDebugReportCallbackEXT = (PFN_vkCreateDebugReportCallbackEXT) SDL_Vulkan_GetVkGetInstanceProcAddr();
 
@@ -204,26 +240,21 @@ void Renderer::initDebug()
 		std::exit(-1);
 	}
 
-	VkDebugReportCallbackCreateInfoEXT debug_callback{};
-	debug_callback.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CREATE_INFO_EXT;
-	debug_callback.pfnCallback = VulkanDebugCallback;
-	debug_callback.flags = VK_DEBUG_REPORT_WARNING_BIT_EXT | VK_DEBUG_REPORT_ERROR_BIT_EXT;
+	VkDebugUtilsMessengerCreateInfoEXT createInfo {};
+	createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+	createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+	createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+	createInfo.pfnUserCallback = debugCallback;
 
-	//fvkCreateDebugReportCallbackEXT(instance, &debug_callback , 0, &debug_report);
+	if (CreateDebugUtilsMessengerEXT(instance, &createInfo, nullptr, &debugMessenger) != VK_SUCCESS) 
+	{
+		throw std::runtime_error("failed to set up debug messenger!");
+	}
 }
-
-// Deinitialize Debugger
-void Renderer::deleteDebug()
-{
-	//fvkDestroyDebugReportCallbackEXT(instance, debug_report, nullptr);
-	debug_report = VK_NULL_HANDLE;
-}
-
-
 
 
 // Handle Vulkan Result Errors
-void Renderer::errorHandler(VkResult error)
+VkResult Renderer::errorHandler(VkResult error)
 {
 	switch (error)
 	{
@@ -357,29 +388,7 @@ void Renderer::errorHandler(VkResult error)
 
 	default:
 		break;
-		/*
-		// Provided by VK_KHR_maintenance1
-		VK_ERROR_OUT_OF_POOL_MEMORY_KHR = VK_ERROR_OUT_OF_POOL_MEMORY,
-
-		// Provided by VK_KHR_external_memory
-		VK_ERROR_INVALID_EXTERNAL_HANDLE_KHR = VK_ERROR_INVALID_EXTERNAL_HANDLE,
-
-		// Provided by VK_EXT_descriptor_indexing
-		VK_ERROR_FRAGMENTATION_EXT = VK_ERROR_FRAGMENTATION,
-
-		// Provided by VK_EXT_buffer_device_address
-		VK_ERROR_INVALID_DEVICE_ADDRESS_EXT = VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS,
-
-		// Provided by VK_KHR_buffer_device_address
-		VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS_KHR = VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS,
-
-		// Provided by VK_EXT_pipeline_creation_cache_control
-		VK_ERROR_PIPELINE_COMPILE_REQUIRED_EXT = VK_PIPELINE_COMPILE_REQUIRED_EXT,
-		*/
 	};
-}
 
-void Renderer::initSurface()
-{
-	//test
+	return error;
 }

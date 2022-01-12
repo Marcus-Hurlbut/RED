@@ -27,30 +27,29 @@ private:
 
 	// Vulkan 
 	VkInstance instance = VK_NULL_HANDLE;						// Vulkan Instance
-	VkDevice device = VK_NULL_HANDLE;							// Logical Device connected to GPU
+	VkDebugUtilsMessengerEXT debugMessenger;					// Vulkan Debugger
 	VkPhysicalDevice gpu = VK_NULL_HANDLE;						// Physical representation of GPU
+	VkDevice device = VK_NULL_HANDLE;							// Logical Device connected to GPU
 	uint32_t graphics_family_index = 0;							// Graphics Family
+	VkResult result;
 
-	std::vector <const char*> layers{};						// Instance layer string enums
-	std::vector <const char*> instance_extensions{};			// Instance extension enums
+	std::vector <const char*> layers{};							// Instance layer string enums
+	std::vector <const char*> SDL_extensions{};			// Instance extension enums
 	std::vector <const char*> device_extensions{};				// Device extension enums
 
 	VkDebugReportCallbackEXT debug_report = VK_NULL_HANDLE;		// Debugger callback report
 
 
 public: // Delete 'public' later *
-	void errorHandler(VkResult error);	// Error Handling for Vulkan results
+	void initVulkan();
+	void deInitVulkan();
+	
+	void createInstance();		// Initialize Vulkan Application instance
+	void createDebug();			// Initialize Debugger	
+	void createSDLWindow();		// Initialize and setup SDL window
+	void setupDevice();			// Initialize & Create physical device & queue families for Setup
+	void createDevice();		// Setup Vulkan GPU Device with 
 
-	void initWindow();					// Initialize SDL window
-	void initInstance();				// Initialize Vulkan Application instance
-	void setupDevice();					// Setup physical device & queue families for initialization
-	void initDevice();					// Initialize Vulkan GPU Device
-	void initDebug();					// Initialize Debugger
-	void initSurface();
-
-	void deleteWindow();				// Deinitialize Window
-	void deleteInstance();				// Deinitialize Instance
-	void deleteDebug();					// Deinitalize Debugger
-	void deleteDevice();				// Deinitialize Device			
+	VkResult errorHandler(VkResult error);	// Error Handling for Vulkan results
 
 };
