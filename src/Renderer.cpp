@@ -14,15 +14,17 @@ Renderer::~Renderer()
 	deInitVulkan();
 }
 
+
 // Initializers & Deinitializers
 void Renderer::initVulkan()
 {
-	createSDLWindow();
+	createWindow();
 	createInstance();
-	createDebug();
+	createDebugMessenger();
 	setupDevice();
 	createDevice();
 }
+
 
 void Renderer::deInitVulkan()
 {
@@ -31,8 +33,11 @@ void Renderer::deInitVulkan()
 	device = VK_NULL_HANDLE;
 
 	// Destroy Debugger Report
-	//fvkDestroyDebugReportCallbackEXT(instance, debug_report, nullptr);
-	debug_report = VK_NULL_HANDLE;
+	if (enableValidationLayers)
+	{
+		destroyDebugMessengerEXT(instance, debug_messenger, nullptr);
+		debug_report = VK_NULL_HANDLE;
+	}
 
 	// Destroy Instance
 	vkDestroyInstance(instance, nullptr);
@@ -40,19 +45,20 @@ void Renderer::deInitVulkan()
 
 	// Destroy SDL Window
 	SDL_DestroyWindow(window);
+	void SDL_Quit(void);
 }
 
+
 // SDL Window Initializaiton and Creation
-void Renderer::createSDLWindow()
+void Renderer::createWindow()
 {
 	// Initialize SDL 
 	SDL_Init(SDL_INIT_VIDEO);
-	window_flags = (SDL_WindowFlags)(SDL_WINDOW_VULKAN);
-	window = SDL_CreateWindow("Vulkan Renderer", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_CENTERED, WINDOW_WIDTH, WINDOW_HEIGHT, window_flags);
+	window = SDL_CreateWindow("Vulkan Renderer", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_CENTERED, WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_VULKAN);
 
 	if (window == nullptr)
 	{
-		assert(1 && "[!] SDL Error: Unable to initilaize SDL window.");
+		std::cout << "\n[!] SDL Error: Unable to initilaize SDL window.\n";
 		std::exit(-1);
 	}
 }
@@ -61,11 +67,19 @@ void Renderer::createSDLWindow()
 // Create a Vulkan Instance
 void Renderer::createInstance()
 {
-	// Extend SDL extensions to Vulkan
-	uint32_t extension_count = 0;
-	SDL_Vulkan_GetInstanceExtensions(window, &extension_count, nullptr);
-	SDL_extensions.resize(extension_count);
-	SDL_Vulkan_GetInstanceExtensions(window, &extension_count, SDL_extensions.data());
+	// Get all Instance Layers
+	uint32_t layer_count = 0;
+	vkEnumerateInstanceLayerProperties(&layer_count, nullptr);
+	std::vector<VkLayerProperties> layer_properties(layer_count);
+	vkEnumerateInstanceLayerProperties(&layer_count, layer_properties.data());
+
+
+	// Check to ensure Support for Validation Layers
+	if (enableValidationLayers && !checkValidationLayers())
+	{
+		std::cout << "\n[!] Validation Error: layers Requested but NOT Found.";
+		std::exit(-1);
+	}
 
 	// Set Application Info
 	VkApplicationInfo application {};
@@ -76,59 +90,161 @@ void Renderer::createInstance()
 	application.pEngineName = "No Engine";
 
 	// Instantiate Vulkan from Application Info and SDL Extensions
-	VkInstanceCreateInfo instance_create {};
-	instance_create.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-	instance_create.pApplicationInfo = &application;
-	instance_create.enabledLayerCount = layers.size();
-	instance_create.ppEnabledLayerNames = layers.data();
-	instance_create.enabledExtensionCount = SDL_extensions.size();
-	instance_create.ppEnabledExtensionNames = SDL_extensions.data();
+	VkInstanceCreateInfo create_info {};
+	create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+	create_info.pApplicationInfo = &application;
+	connectSDLExtensions();
+	create_info.enabledExtensionCount = static_cast<uint32_t>(SDL_extensions.size());
+	create_info.ppEnabledExtensionNames = SDL_extensions.data();
+
+	// Validate Instance Layers
+	VkDebugUtilsMessengerCreateInfoEXT debug_create_info{};
+	if (enableValidationLayers)
+	{
+		create_info.enabledLayerCount = static_cast<uint32_t>(validation_layers.size());
+		create_info.ppEnabledLayerNames = validation_layers.data();
+
+		insertDebugInfo(debug_create_info);
+		create_info.pNext = (VkDebugUtilsMessengerCreateInfoEXT*) &debug_create_info;
+	}
+	else 
+	{
+		create_info.enabledLayerCount = 0;
+		create_info.pNext = nullptr;
+	}
 
 	// Instance Error Handling
-	if (errorHandler(vkCreateInstance(&instance_create, nullptr, &instance)) != VK_SUCCESS)
+	if (errorHandler(vkCreateInstance(&create_info, nullptr, &instance)) != VK_SUCCESS)
 	{
-		throw std::runtime_error("[!] Failed to Create a Vulkan Instance.");
+		std::cout << "[!] Failed to Create a Vulkan Instance.";
+		std::exit(-1);
 	}
+}
 
-	// Check Instance Extensions support
-	uint32_t instance_extension_count = 0;
-	vkEnumerateInstanceExtensionProperties(nullptr, &instance_extension_count, nullptr);
-	std::vector <VkExtensionProperties> extensions(instance_extension_count);
-	vkEnumerateInstanceExtensionProperties(nullptr, &instance_extension_count, extensions.data());
 
-	// Print Supported Instance Extensions
-	std::cout << "\nInstance Extensions:\n";
-	for (const auto& extension : extensions)
+// Check for Validation Layers Support in Instance
+bool Renderer::checkValidationLayers()
+{
+	// Get Instance Layer Property Enums for iteration
+	uint32_t layerCount;
+	vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+	std::vector <VkLayerProperties> availableLayers(layerCount);
+	vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
+
+	bool layerFound = false;
+
+	// Check Validation Layers
+	for (const char* layerName : validation_layers)
 	{
-		std::cout << '\t' << extension.extensionName << '\n';
+		layerFound = false;
+		// Iterate and Check through Layer Layers
+		for (const auto& layerProperties : availableLayers)
+		{
+			if (strcmp(layerName, layerProperties.layerName) == 0)
+			{
+				layerFound = true;
+				break;
+			}
+		}
+		if (!layerFound)
+		{
+			std::cout << "\n[!] " << layerName << " Validation Layer NOT Found\n";
+			return false;
+		}
 	}
+	return true;
+}
 
-	// Check Instance Layer Properties
-	uint32_t layer_count = 0;
-	vkEnumerateInstanceLayerProperties(&layer_count, nullptr);
-	std::vector<VkLayerProperties> layer_properties(layer_count);
-	vkEnumerateInstanceLayerProperties(&layer_count, layer_properties.data());
 
-	// Print all Instance Layers
-	std::cout << "Instance Layers:\n";
-	for (auto& i : layer_properties)
+// Connect SDL Extensions to Vulkan Application
+void Renderer::connectSDLExtensions()
+{
+	// Get SDL Extensions required to make Surface in Vulkan
+	uint32_t extension_count = 0;
+	SDL_Vulkan_GetInstanceExtensions(window, &extension_count, nullptr);
+	SDL_extensions.resize(extension_count);
+	SDL_Vulkan_GetInstanceExtensions(window, &extension_count, SDL_extensions.data());
+
+	if (enableValidationLayers)
 	{
-		std::cout << "\n " << i.layerName << "\t\t | " << i.description;
+		SDL_extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+	}
+}
+
+
+// Initialize Debug Messenger Extension
+VkResult Renderer::createDebugMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger)
+{
+	auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
+	if (func != nullptr)
+	{
+		return func(instance, pCreateInfo, pAllocator, pDebugMessenger);
+	}
+	else
+	{
+		return VK_ERROR_EXTENSION_NOT_PRESENT;
 	};
 }
 
+
+// Destroy Debug Messenger Extension
+void Renderer::destroyDebugMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT debugMessenger, const VkAllocationCallbacks* pAllocator)
+{
+	auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
+	if (func != nullptr) {
+		func(instance, debugMessenger, pAllocator);
+	}
+}
+
+
+// Vulkan Debug Callback Function
+static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData)
+{
+	std::cerr << "\nDebug Callback - Validation layer: " << pCallbackData->pMessage << std::endl;
+	return VK_FALSE;
+}
+
+
+// Initialize Debugger
+void Renderer::createDebugMessenger()
+{
+	if (!enableValidationLayers) return;
+	
+	VkDebugUtilsMessengerCreateInfoEXT create_info{};
+	insertDebugInfo(create_info);
+	create_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+	create_info.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+	create_info.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+	create_info.pfnUserCallback = debugCallback;
+
+	if (createDebugMessengerEXT(instance, &create_info, nullptr, &debug_messenger) != VK_SUCCESS)
+	{
+		throw std::runtime_error("[!] Failed to setup Debug messenger.");
+		std::exit(-1);
+	}
+
+}
+
+// Create and Initialize Debug Messenger
+void Renderer::insertDebugInfo(VkDebugUtilsMessengerCreateInfoEXT& info)
+{
+	info = {};
+	info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+	info.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+	info.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+	info.pfnUserCallback = debugCallback;
+}
 
 
 // Setup physical device & queue families for initialization
 void Renderer::setupDevice()
 {
-	// Initialize Physical Device - GPU
+	// Get Physical Device - GPU
 	uint32_t gpu_count = 0;
-	std::vector<VkPhysicalDevice> gpu_list;
 	vkEnumeratePhysicalDevices(instance, &gpu_count, nullptr);
-	gpu_list.resize(gpu_count);
-	vkEnumeratePhysicalDevices(instance, &gpu_count, gpu_list.data());
-	gpu = gpu_list[0];
+	std::vector<VkPhysicalDevice> physical_devices(gpu_count);
+	vkEnumeratePhysicalDevices(instance, &gpu_count, physical_devices.data());
+	//physical_device = physical_devices[0];
 
 	if (gpu_count == 0)
 	{
@@ -136,12 +252,35 @@ void Renderer::setupDevice()
 		std::exit(-1);
 	}
 
+	for (const auto& device : physical_devices) 
+	{
+		QueueFamilyIndices indices = findQueueFamilies(device);
+
+		if (indices.hasEntry()) 
+		{
+			physical_device = device;
+			break;
+		}
+	}
+
+	if (physical_device == VK_NULL_HANDLE) 
+	{
+		throw std::runtime_error("failed to find a suitable GPU!");
+	}
+
+}
+
+
+Renderer::QueueFamilyIndices Renderer::findQueueFamilies(VkPhysicalDevice device)
+{
+	QueueFamilyIndices indices;
+
 	// Initialize Queue Family
 	uint32_t family_count = 0;
 	std::vector<VkQueueFamilyProperties> queue_families;
-	vkGetPhysicalDeviceQueueFamilyProperties(gpu, &family_count, nullptr);
+	vkGetPhysicalDeviceQueueFamilyProperties(device, &family_count, nullptr);
 	queue_families.resize(family_count);
-	vkGetPhysicalDeviceQueueFamilyProperties(gpu, &family_count, queue_families.data());
+	vkGetPhysicalDeviceQueueFamilyProperties(device, &family_count, queue_families.data());
 
 	// Find a Supporting Queue Family
 	bool found = false;
@@ -149,8 +288,13 @@ void Renderer::setupDevice()
 	{
 		if (queue_families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
 		{
-			found = true;
 			graphics_family_index = i;
+			indices.graphicsFamily = i;
+		}
+		if (indices.hasEntry()) 
+		{
+			found = true;
+			break;
 		}
 	}
 
@@ -161,20 +305,7 @@ void Renderer::setupDevice()
 		std::exit(-1);
 	}
 
-	// Enumerate Device Layer Properties
-	uint32_t device_layer_count = 0;
-	std::vector<VkLayerProperties> device_layer_properties;
-	vkEnumerateDeviceLayerProperties(gpu, &device_layer_count, nullptr);
-	device_layer_properties.resize(device_layer_count);
-	vkEnumerateDeviceLayerProperties(gpu, &device_layer_count, device_layer_properties.data());
-
-
-	// Print all Device Layers
-	std::cout << "\nDevice Layers:\n";
-	for (auto& i : device_layer_properties)
-	{
-		std::cout << "\n " << i.layerName << "\t\t | " << i.description;
-	};
+	return indices;
 }
 
 
@@ -195,60 +326,15 @@ void Renderer::createDevice()
 	device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 	device_create_info.queueCreateInfoCount = 1;
 	device_create_info.pQueueCreateInfos = &device_queue_create_info;
-	device_create_info.enabledLayerCount = layers.size();
-	device_create_info.ppEnabledLayerNames = layers.data();
+	device_create_info.enabledLayerCount = device_layers.size();
+	device_create_info.ppEnabledLayerNames = device_layers.data();
 	device_create_info.enabledExtensionCount = device_extensions.size();
 	device_create_info.ppEnabledExtensionNames = device_extensions.data();
 
-	result = errorHandler(vkCreateDevice(gpu, &device_create_info, nullptr, &device));
+	result = errorHandler(vkCreateDevice(physical_device, &device_create_info, nullptr, &device));
 	if (result != VK_SUCCESS)
 	{
 		throw std::runtime_error("\n[!] Failed to Create Vulkan Device");
-	}
-}
-
-
-// Vulkan Debug Callback Function
-static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData) 
-{
-	std::cerr << "validation layer: " << pCallbackData->pMessage << std::endl;
-	return VK_FALSE;
-}
-
-
-// Set up Debugger pointer
-PFN_vkCreateDebugReportCallbackEXT fvkCreateDebugReportCallbackEXT = nullptr;		// Debugger report create ptr
-
-VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger) 
-{
-	auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
-	if (func != nullptr) 
-	{
-		return func(instance, pCreateInfo, pAllocator, pDebugMessenger);
-	}
-	return VK_ERROR_EXTENSION_NOT_PRESENT;
-}
-
-// Initialize Debugger
-void Renderer::createDebug()
-{
-	fvkCreateDebugReportCallbackEXT = (PFN_vkCreateDebugReportCallbackEXT) SDL_Vulkan_GetVkGetInstanceProcAddr();
-
-	if (nullptr == fvkCreateDebugReportCallbackEXT)
-	{
-		assert(1 && "[!] Vulkan Error: Cannot fetch debug function pointers.");
-		std::exit(-1);
-	}
-
-	VkDebugUtilsMessengerCreateInfoEXT createInfo {};
-	createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-	createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-	createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
-	createInfo.pfnUserCallback = debugCallback;
-
-	if (CreateDebugUtilsMessengerEXT(instance, &createInfo, nullptr, &debugMessenger) != VK_SUCCESS) 
-	{
-		throw std::runtime_error("failed to set up debug messenger!");
 	}
 }
 
@@ -259,134 +345,135 @@ VkResult Renderer::errorHandler(VkResult error)
 	switch (error)
 	{
 	case VK_ERROR_OUT_OF_HOST_MEMORY:
-		std::cout << "VK_ERROR_OUT_OF_HOST_MEMORY" << std::endl;
+		std::cout << "\n[!] Error: VK_ERROR_OUT_OF_HOST_MEMORY" << std::endl;
 		break;
 
 	case VK_ERROR_OUT_OF_DEVICE_MEMORY:
-		std::cout << "VK_ERROR_OUT_OF_DEVICE_MEMORY" << std::endl;
+		std::cout << "\n[!] Error: VK_ERROR_OUT_OF_DEVICE_MEMORY" << std::endl;
 		break;
 
 	case VK_ERROR_INITIALIZATION_FAILED:
-		std::cout << "VK_ERROR_INITIALIZATION_FAILED" << std::endl;
+		std::cout << "\n[!] Error: VK_ERROR_INITIALIZATION_FAILED" << std::endl;
 		break;
 
 	case VK_ERROR_DEVICE_LOST:
-		std::cout << "VK_ERROR_DEVICE_LOST" << std::endl;
+		std::cout << "\n[!] Error: VK_ERROR_DEVICE_LOST" << std::endl;
 		break;
 
 	case VK_ERROR_MEMORY_MAP_FAILED:
-		std::cout << "VK_ERROR_MEMORY_MAP_FAILED" << std::endl;
+		std::cout << "\n[!] Error: VK_ERROR_MEMORY_MAP_FAILED" << std::endl;
 		break;
 
 	case VK_ERROR_LAYER_NOT_PRESENT:
-		std::cout << "VK_ERROR_LAYER_NOT_PRESENT" << std::endl;
+		std::cout << "\n[!] Error: VK_ERROR_LAYER_NOT_PRESENT" << std::endl;
 		break;
 
 	case VK_ERROR_EXTENSION_NOT_PRESENT:
-		std::cout << "VK_ERROR_EXTENSION_NOT_PRESENT" << std::endl;
+		std::cout << "\n[!] Error: VK_ERROR_EXTENSION_NOT_PRESENT" << std::endl;
 		break;
 
 	case VK_ERROR_FEATURE_NOT_PRESENT:
-		std::cout << "VK_ERROR_FEATURE_NOT_PRESENT" << std::endl;
+		std::cout << "\n[!] Error: VK_ERROR_FEATURE_NOT_PRESENT" << std::endl;
 		break;
 
 	case VK_ERROR_INCOMPATIBLE_DRIVER:
-		std::cout << "VK_ERROR_INCOMPATIBLE_DRIVER" << std::endl;
+		std::cout << "\n[!] Error: VK_ERROR_INCOMPATIBLE_DRIVER" << std::endl;
 		break;
 
 	case VK_ERROR_TOO_MANY_OBJECTS:
-		std::cout << "VK_ERROR_TOO_MANY_OBJECTS" << std::endl;
+		std::cout << "\n[!] Error: VK_ERROR_TOO_MANY_OBJECTS" << std::endl;
 		break;
 
 	case VK_ERROR_FORMAT_NOT_SUPPORTED:
-		std::cout << "VK_ERROR_FORMAT_NOT_SUPPORTED" << std::endl;
+		std::cout << "\n[!] Error: VK_ERROR_FORMAT_NOT_SUPPORTED" << std::endl;
 		break;
 
 	case VK_ERROR_FRAGMENTED_POOL:
-		std::cout << "VK_ERROR_FRAGMENTED_POOL" << std::endl;
+		std::cout << "\n[!] Error: VK_ERROR_FRAGMENTED_POOL" << std::endl;
 		break;
 
 	case VK_ERROR_UNKNOWN:
-		std::cout << "VK_ERROR_UNKNOWN" << std::endl;
+		std::cout << "\n[!] Error: VK_ERROR_UNKNOWN" << std::endl;
 		break;
 
 	case VK_ERROR_OUT_OF_POOL_MEMORY:
-		std::cout << "VK_ERROR_OUT_OF_POOL_MEMORY" << std::endl;				// Provided by VK_VERSION_1_1
+		std::cout << "\n[!] Error: VK_ERROR_OUT_OF_POOL_MEMORY" << std::endl;			
 		break;
 
 	case VK_ERROR_INVALID_EXTERNAL_HANDLE:
-		std::cout << "VK_ERROR_INVALID_EXTERNAL_HANDLE" << std::endl;			// Provided by VK_VERSION_1_1
+		std::cout << "\n[!] Error: VK_ERROR_INVALID_EXTERNAL_HANDLE" << std::endl;		
 		break;
 
 	case VK_ERROR_FRAGMENTATION:
-		std::cout << "VK_ERROR_FRAGMENTATION" << std::endl;						// Provided by VK_VERSION_1_2
+		std::cout << "\n[!] Error: VK_ERROR_FRAGMENTATION" << std::endl;					
 		break;
 
 	case VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS:
-		std::cout << "VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS" << std::endl;	// Provided by VK_VERSION_1_2
+		std::cout << "\n[!] Error: VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS" << std::endl;	
 		break;
 
 	case VK_ERROR_SURFACE_LOST_KHR:
-		std::cout << "VK_ERROR_SURFACE_LOST_KHR" << std::endl;					// Provided by VK_KHR_surface
+		std::cout << "\n[!] Error: VK_ERROR_SURFACE_LOST_KHR" << std::endl;					
 		break;
 
 	case VK_ERROR_NATIVE_WINDOW_IN_USE_KHR:
-		std::cout << "VK_ERROR_NATIVE_WINDOW_IN_USE_KHR" << std::endl;			// Provided by VK_KHR_surface
+		std::cout << "\n[!] Error: VK_ERROR_NATIVE_WINDOW_IN_USE_KHR" << std::endl;			
 		break;
 
 	case VK_SUBOPTIMAL_KHR:
-		std::cout << "VK_SUBOPTIMAL_KHR" << std::endl;							// Provided by VK_KHR_swapchain
+		std::cout << "\n[!] Error: VK_SUBOPTIMAL_KHR" << std::endl;							
 		break;
 
 	case VK_ERROR_OUT_OF_DATE_KHR:
-		std::cout << "VK_ERROR_OUT_OF_DATE_KHR" << std::endl;					// Provided by VK_KHR_swapchain
+		std::cout << "\n[!] Error: VK_ERROR_OUT_OF_DATE_KHR" << std::endl;					
 		break;
 
 	case VK_ERROR_INCOMPATIBLE_DISPLAY_KHR:
-		std::cout << "VK_ERROR_INCOMPATIBLE_DISPLAY_KHR" << std::endl;			// Provided by VK_KHR_display_swapchain
+		std::cout << "\n[!] Error: VK_ERROR_INCOMPATIBLE_DISPLAY_KHR" << std::endl;			
 		break;
 
 	case VK_ERROR_VALIDATION_FAILED_EXT:
-		std::cout << "VK_ERROR_VALIDATION_FAILED_EXT " << std::endl;			// Provided by VK_EXT_debug_report
+		std::cout << "\n[!] Error: VK_ERROR_VALIDATION_FAILED_EXT " << std::endl;			
 		break;
 
 	case VK_ERROR_INVALID_SHADER_NV:
-		std::cout << "VK_ERROR_INVALID_SHADER_NV" << std::endl;					// Provided by VK_NV_glsl_shader
+		std::cout << "\n[!] Error: VK_ERROR_INVALID_SHADER_NV" << std::endl;				
 		break;
 
 	case VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT:
-		std::cout << "VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT" << std::endl;	// Provided by VK_EXT_image_drm_format_modifier
+		std::cout << "\n[!] Error: VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT" << std::endl;	
 		break;
 
 	case VK_ERROR_NOT_PERMITTED_EXT:
-		std::cout << "VK_ERROR_NOT_PERMITTED_EXT" << std::endl;					// Provided by VK_EXT_global_priority
+		std::cout << "\n[!] Error: VK_ERROR_NOT_PERMITTED_EXT" << std::endl;					
 		break;
 
 	case VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT:
-		std::cout << "VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT" << std::endl;		// Provided by VK_EXT_full_screen_exclusive
+		std::cout << "\n[!] Error: VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT" << std::endl;		
 		break;
 
 	case VK_THREAD_IDLE_KHR:
-		std::cout << "VK_THREAD_IDLE_KHR" << std::endl;							// Provided by VK_KHR_deferred_host_operations
+		std::cout << "\n[!] Error: VK_THREAD_IDLE_KHR" << std::endl;							
 		break;
 
 	case VK_THREAD_DONE_KHR:
-		std::cout << "VK_THREAD_DONE_KHR" << std::endl;							// Provided by VK_KHR_deferred_host_operations
+		std::cout << "\n[!] Error: VK_THREAD_DONE_KHR" << std::endl;					
 		break;
 
 	case VK_OPERATION_DEFERRED_KHR:
-		std::cout << "VK_OPERATION_DEFERRED_KHR" << std::endl;					// Provided by VK_KHR_deferred_host_operations
+		std::cout << "\n[!] Error: VK_OPERATION_DEFERRED_KHR" << std::endl;					
 		break;
 
 	case VK_OPERATION_NOT_DEFERRED_KHR:
-		std::cout << "VK_OPERATION_NOT_DEFERRED_KHR" << std::endl;				// Provided by VK_KHR_deferred_host_operations
+		std::cout << "\n[!] Error: VK_OPERATION_NOT_DEFERRED_KHR" << std::endl;			
 		break;
 
 	case VK_PIPELINE_COMPILE_REQUIRED_EXT:
-		std::cout << "VK_OPERATION_NOT_DEFERRED_KHR" << std::endl;				// Provided by VK_EXT_pipeline_creation_cache_control
+		std::cout << "\n[!] Error: VK_OPERATION_NOT_DEFERRED_KHR" << std::endl;				
 		break;
 
 	default:
+		return VK_SUCCESS;
 		break;
 	};
 

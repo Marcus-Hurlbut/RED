@@ -1,5 +1,7 @@
 
 #include <windows.h>
+#include <sstream>
+#include <iostream>
 #include "Renderer.h"
 
 #define WIDTH 400
@@ -11,7 +13,9 @@
 int main()
 {
     Renderer vulkan;
+    //std::cout << "[*] End of Vulkan Initialization. ";
     Sleep(5000);
+
 
     return 0;
 }
