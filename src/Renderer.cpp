@@ -215,7 +215,7 @@ void Renderer::createDebugMessenger()
 	create_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
 	create_info.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
 	create_info.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
-	create_info.pfnUserCallback = debugCallback;
+	create_info.pfnUserCallback = debugCallback;  
 
 	if (createDebugMessengerEXT(instance, &create_info, nullptr, &debug_messenger) != VK_SUCCESS)
 	{
@@ -301,7 +301,7 @@ Renderer::QueueFamilyIndices Renderer::findQueueFamilies(VkPhysicalDevice device
 	// Error Handling for Queue Family
 	if (!found)
 	{
-		assert(1 && "[!] Vulkan Error: Queue family for supporting graphics not found.");
+		std::cout << "[!] Vulkan Error: Queue family for supporting graphics not found.";
 		std::exit(-1);
 	}
 
@@ -334,7 +334,8 @@ void Renderer::createDevice()
 	result = errorHandler(vkCreateDevice(physical_device, &device_create_info, nullptr, &device));
 	if (result != VK_SUCCESS)
 	{
-		throw std::runtime_error("\n[!] Failed to Create Vulkan Device");
+		std::cout << ("\n[!] Failed to Create Vulkan Device");
+		std::exit(-1);
 	}
 }
 
