@@ -21,8 +21,9 @@ void Renderer::initVulkan()
 	createWindow();
 	createInstance();
 	createDebugMessenger();
-	setupDevice();
-	createDevice();
+	createSurface();
+	createPhysicalDevice();
+	createLogicalDevice();
 }
 
 
@@ -39,11 +40,14 @@ void Renderer::deInitVulkan()
 		debug_report = VK_NULL_HANDLE;
 	}
 
+	// Destroy Surface
+	vkDestroySurfaceKHR(instance, surface, nullptr);
+
 	// Destroy Instance
 	vkDestroyInstance(instance, nullptr);
 	instance = nullptr;
 
-	// Destroy SDL Window
+	// Destroy SDL Window and Quit SDL
 	SDL_DestroyWindow(window);
 	void SDL_Quit(void);
 }
@@ -237,14 +241,13 @@ void Renderer::insertDebugInfo(VkDebugUtilsMessengerCreateInfoEXT& info)
 
 
 // Setup physical device & queue families for initialization
-void Renderer::setupDevice()
+void Renderer::createPhysicalDevice()
 {
 	// Get Physical Device - GPU
 	uint32_t gpu_count = 0;
 	vkEnumeratePhysicalDevices(instance, &gpu_count, nullptr);
 	std::vector<VkPhysicalDevice> physical_devices(gpu_count);
 	vkEnumeratePhysicalDevices(instance, &gpu_count, physical_devices.data());
-	//physical_device = physical_devices[0];
 
 	if (gpu_count == 0)
 	{
@@ -284,11 +287,11 @@ Renderer::QueueFamilyIndices Renderer::findQueueFamilies(VkPhysicalDevice device
 
 	// Find a Supporting Queue Family
 	bool found = false;
-	for (uint32_t i = 0; i < family_count; ++i)
+	for (uint32_t i = 0; i < family_count; i++)
 	{
 		if (queue_families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
 		{
-			graphics_family_index = i;
+			queue_family_index = i;
 			indices.graphicsFamily = i;
 		}
 		if (indices.hasEntry()) 
@@ -310,35 +313,62 @@ Renderer::QueueFamilyIndices Renderer::findQueueFamilies(VkPhysicalDevice device
 
 
 // Initialize Vulkan Device
-void Renderer::createDevice()
+void Renderer::createLogicalDevice()
 {
-	float queue_priorities[]{ 1.0f };
-
-	// Allocate Device Queue from Queue Family
+	// Specify the # of queues for a single queue family that need to be created
 	VkDeviceQueueCreateInfo device_queue_create_info {};
 	device_queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-	device_queue_create_info.queueFamilyIndex = graphics_family_index;
+	device_queue_create_info.queueFamilyIndex = queue_family_index;
 	device_queue_create_info.queueCount = 1;
+	float queue_priorities[]{ 1.0f };
 	device_queue_create_info.pQueuePriorities = queue_priorities;
 
-	// Create Device Info
+	// Specify device's features used with physical device - [!] Fill feature support in later when renderer advances 
+	VkPhysicalDeviceFeatures device_features{};
+
+
+	// Create Device Info - Logical Device
 	VkDeviceCreateInfo device_create_info{};
 	device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 	device_create_info.queueCreateInfoCount = 1;
 	device_create_info.pQueueCreateInfos = &device_queue_create_info;
-	device_create_info.enabledLayerCount = device_layers.size();
-	device_create_info.ppEnabledLayerNames = device_layers.data();
-	device_create_info.enabledExtensionCount = device_extensions.size();
-	device_create_info.ppEnabledExtensionNames = device_extensions.data();
-
-	result = errorHandler(vkCreateDevice(physical_device, &device_create_info, nullptr, &device));
-	if (result != VK_SUCCESS)
+	device_create_info.pEnabledFeatures = &device_features;
+	device_create_info.enabledExtensionCount = device_extensions.size();		// [!] Fill in logical extensions later
+	device_create_info.ppEnabledExtensionNames = device_extensions.data();		// [!] Fill in logical extensions later
+	
+	// Validation Layer Support for Logical Device
+	if (enableValidationLayers)
 	{
-		std::cout << ("\n[!] Failed to Create Vulkan Device");
+		device_create_info.enabledLayerCount = static_cast<uint32_t> (validation_layers.size());
+		device_create_info.ppEnabledLayerNames = validation_layers.data();
+	}
+	else
+	{
+		device_create_info.enabledLayerCount = 0;
+	}
+
+	// Logical device error handling
+	if (errorHandler(vkCreateDevice(physical_device, &device_create_info, nullptr, &device)) != VK_SUCCESS)
+	{
+		std::cout << ("\n[!] Failed to Create Vulkan Logical Device");
 		std::exit(-1);
 	}
+
+	// Get Logical Device Queue Handles
+	vkGetDeviceQueue(device, queue_family_index, 0, &graphics_queue);
 }
 
+
+// Initialize Window Surface
+void Renderer::createSurface()
+{
+	if (SDL_Vulkan_CreateSurface(window, instance, &surface) != SDL_TRUE)
+	{
+		std::cout << "[!] Error: Failed to create vulkan surface window.";
+		std::exit(-1);
+	}
+
+}
 
 // Handle Vulkan Result Errors
 VkResult Renderer::errorHandler(VkResult error)
