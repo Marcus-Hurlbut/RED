@@ -97,7 +97,7 @@ void Renderer::createInstance()
 	VkInstanceCreateInfo create_info {};
 	create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 	create_info.pApplicationInfo = &application;
-	connectSDLExtensions();
+	checkSDLExtensions();
 	create_info.enabledExtensionCount = static_cast<uint32_t>(SDL_extensions.size());
 	create_info.ppEnabledExtensionNames = SDL_extensions.data();
 
@@ -161,7 +161,7 @@ bool Renderer::checkValidationLayers()
 
 
 // Connect SDL Extensions to Vulkan Application
-void Renderer::connectSDLExtensions()
+void Renderer::checkSDLExtensions()
 {
 	// Get SDL Extensions required to make Surface in Vulkan
 	uint32_t extension_count = 0;
@@ -248,24 +248,27 @@ void Renderer::createPhysicalDevice()
 	vkEnumeratePhysicalDevices(instance, &gpu_count, nullptr);
 	std::vector<VkPhysicalDevice> physical_devices(gpu_count);
 	vkEnumeratePhysicalDevices(instance, &gpu_count, physical_devices.data());
-
+	
+	// Physical Device Not Found Error
 	if (gpu_count == 0)
 	{
-		assert(1 && "[!] Vulkan Error: Failed to find a supporting GPU.");
+		std::cout << "[!] Vulkan Error: Failed to find a supporting GPU.";
 		std::exit(-1);
-	}
+	};
 
-	for (const auto& device : physical_devices) 
+	// Check for a Supporting Device
+	for (const auto& device : physical_devices)
 	{
-		QueueFamilyIndices indices = findQueueFamilies(device);
-
-		if (indices.hasEntry()) 
+		bool isSuitable = false;
+		validatePhysicalDevice(isSuitable, device);
+		if (isSuitable)
 		{
 			physical_device = device;
 			break;
 		}
 	}
 
+	// Device Validation Error
 	if (physical_device == VK_NULL_HANDLE) 
 	{
 		throw std::runtime_error("failed to find a suitable GPU!");
@@ -274,7 +277,7 @@ void Renderer::createPhysicalDevice()
 }
 
 
-Renderer::QueueFamilyIndices Renderer::findQueueFamilies(VkPhysicalDevice device)
+Renderer::QueueFamilyIndices Renderer::queryQueueFamilies(VkPhysicalDevice device)
 {
 	QueueFamilyIndices indices;
 
@@ -294,6 +297,15 @@ Renderer::QueueFamilyIndices Renderer::findQueueFamilies(VkPhysicalDevice device
 			queue_family_index = i;
 			indices.graphicsFamily = i;
 		}
+		VkBool32 presentSupport = false;
+		vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport);
+
+		if (presentSupport)
+		{
+			indices.presentFamily = i;
+			present_family_index = i;
+		}
+
 		if (indices.hasEntry()) 
 		{
 			found = true;
@@ -312,16 +324,60 @@ Renderer::QueueFamilyIndices Renderer::findQueueFamilies(VkPhysicalDevice device
 }
 
 
+// Check for all Device Extensions
+bool Renderer::checkDeviceExtensions(VkPhysicalDevice dev)
+{
+	// Lookup the available device extensions
+	uint32_t extension_count;
+	vkEnumerateDeviceExtensionProperties(dev, nullptr, &extension_count, nullptr);
+	std::vector<VkExtensionProperties> device_extensions(extension_count);
+	vkEnumerateDeviceExtensionProperties(dev, nullptr, &extension_count, device_extensions.data());
+
+	// Check against required extensions
+	std::set <std::string> required_extensions(deviceExtensions.begin(), deviceExtensions.end());
+	for (const auto& extension : device_extensions)
+	{
+		required_extensions.erase(extension.extensionName);
+	}
+
+	return required_extensions.empty();
+}
+
+
+// Validate Physical Device Properties - Queue families & Extensions
+void Renderer::validatePhysicalDevice(bool& suitable, VkPhysicalDevice device)
+{
+	QueueFamilyIndices indices = queryQueueFamilies(device);
+
+	bool extensionsSupported = checkDeviceExtensions(device);
+
+	bool supported_swap_chain = false;
+	if (extensionsSupported) {
+		SwapChainProperties swapChainSupport = querySwapChainProp(device);
+		supported_swap_chain = !swapChainSupport.surfaceFormats.empty() && !swapChainSupport.presentModes.empty();
+	}
+
+	suitable = (indices.hasEntry() && extensionsSupported && supported_swap_chain);
+}
+
 // Initialize Vulkan Device
 void Renderer::createLogicalDevice()
 {
-	// Specify the # of queues for a single queue family that need to be created
-	VkDeviceQueueCreateInfo device_queue_create_info {};
-	device_queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-	device_queue_create_info.queueFamilyIndex = queue_family_index;
-	device_queue_create_info.queueCount = 1;
-	float queue_priorities[]{ 1.0f };
-	device_queue_create_info.pQueuePriorities = queue_priorities;
+	QueueFamilyIndices indices = queryQueueFamilies(physical_device);
+
+	std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+	std::set<uint32_t> uniqueQueueFamilies = { indices.graphicsFamily, indices.presentFamily };
+	float queue_priority[]{ 1.0f };
+
+	// Iterate through all Queue Families for GPU
+	for (uint32_t queueFamily : uniqueQueueFamilies) {
+		VkDeviceQueueCreateInfo create_info{};
+		create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+		create_info.queueFamilyIndex = queueFamily;
+		create_info.queueCount = 1;
+		create_info.pQueuePriorities = queue_priority;
+		queueCreateInfos.push_back(create_info);
+	}
 
 	// Specify device's features used with physical device - [!] Fill feature support in later when renderer advances 
 	VkPhysicalDeviceFeatures device_features{};
@@ -330,11 +386,11 @@ void Renderer::createLogicalDevice()
 	// Create Device Info - Logical Device
 	VkDeviceCreateInfo device_create_info{};
 	device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-	device_create_info.queueCreateInfoCount = 1;
-	device_create_info.pQueueCreateInfos = &device_queue_create_info;
+	device_create_info.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
+	device_create_info.pQueueCreateInfos = queueCreateInfos.data();
 	device_create_info.pEnabledFeatures = &device_features;
-	device_create_info.enabledExtensionCount = device_extensions.size();		// [!] Fill in logical extensions later
-	device_create_info.ppEnabledExtensionNames = device_extensions.data();		// [!] Fill in logical extensions later
+	device_create_info.enabledExtensionCount = static_cast<uint32_t> (deviceExtensions.size());		// [!] Fill in logical extensions later
+	device_create_info.ppEnabledExtensionNames = deviceExtensions.data();		// [!] Fill in logical extensions later
 	
 	// Validation Layer Support for Logical Device
 	if (enableValidationLayers)
@@ -356,6 +412,7 @@ void Renderer::createLogicalDevice()
 
 	// Get Logical Device Queue Handles
 	vkGetDeviceQueue(device, queue_family_index, 0, &graphics_queue);
+	vkGetDeviceQueue(device, present_family_index, 0, &present_queue);
 }
 
 
@@ -369,6 +426,107 @@ void Renderer::createSurface()
 	}
 
 }
+
+
+
+Renderer::SwapChainProperties Renderer::querySwapChainProp(VkPhysicalDevice device)
+{
+	SwapChainProperties properties;
+	uint32_t format_count;
+	uint32_t mode_count;
+
+	// Get Surface Capabilities
+	vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &properties.extentCapabilities);
+
+	// Get Surface Formats
+	vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &format_count, nullptr);
+	properties.surfaceFormats.resize(format_count);
+	vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &format_count, properties.surfaceFormats.data());
+
+	// Get Presentation Mode
+	vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &mode_count, nullptr);
+	properties.presentModes.resize(mode_count);
+	vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &mode_count, properties.presentModes.data());
+
+	return properties;
+}
+
+
+void Renderer::setSwapChainProp(SwapChainProperties& availableProperties)
+{
+	// Set Surface Format
+	for (const auto& availableFormat : availableProperties.surfaceFormats) {
+		if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+			availableProperties.format = availableFormat;
+			break;
+		}
+		else
+		{
+			availableProperties.format = availableProperties.surfaceFormats[0];
+		}
+	}
+
+	// Set Presentation Mode
+	for (const auto& availablePresentMode : availableProperties.presentModes) {
+		if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
+			availableProperties.mode = availablePresentMode;
+			break;
+		}
+		else
+		{
+			availableProperties.mode = VK_PRESENT_MODE_FIFO_KHR;
+		}
+	}
+
+	// Set Resolution Extent Capabilities
+	if (availableProperties.extentCapabilities.currentExtent.width != UINT32_MAX) 
+	{
+		availableProperties.extent = availableProperties.extentCapabilities.currentExtent;
+	}
+	else 
+	{
+		int width, height;
+		SDL_Vulkan_GetDrawableSize(window, &width, &height);
+
+		VkExtent2D actualExtent = {
+			static_cast<uint32_t>(width),
+			static_cast<uint32_t>(height)
+		};
+
+		availableProperties.extent = actualExtent;
+		std::cout << "[!] Resolution Error: Swap Chain Extent is set past the maximum!";
+	}
+
+}
+
+
+void Renderer::createSwapChain()
+{
+	// Query Physical Device's Swap Chain Properties
+	SwapChainProperties swapChainProperties = querySwapChainProp(physical_device);
+
+	// Set Swap Chain Properties with available criteria
+	setSwapChainProp(swapChainProperties);
+
+	uint32_t image_count = swapChainProperties.extentCapabilities.minImageCount + 1;
+
+	if (swapChainProperties.extentCapabilities.maxImageCount > 0 && image_count > swapChainProperties.extentCapabilities.maxImageCount)
+	{
+		image_count = swapChainProperties.extentCapabilities.maxImageCount;
+	}
+
+	VkSwapchainCreateInfoKHR createInfo{};
+	createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+	createInfo.surface = surface;
+	createInfo.minImageCount = image_count;
+	createInfo.imageFormat = swapChainProperties.format.format;
+	createInfo.imageColorSpace = swapChainProperties.format.colorSpace;
+	createInfo.imageExtent = swapChainProperties.extent;
+	createInfo.imageArrayLayers = 1;
+	createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+}
+
 
 // Handle Vulkan Result Errors
 VkResult Renderer::errorHandler(VkResult error)
