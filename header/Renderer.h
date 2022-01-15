@@ -47,11 +47,15 @@ private:
 
 	// Vulkan Presentation Components
 	VkSurfaceKHR surface;										// Window Surface
+	VkSwapchainKHR swap_chain = VK_NULL_HANDLE;					// Swap Chain
+	std::vector <VkImage> swapChainImages;						// Images in swap chain
+	VkFormat swap_chain_image_format;							// Format of swapchain
+	VkExtent2D swap_chain_extent;								// Extent / resolution
 
 
 	// Validation Layers for Vulkan Elements
 	const bool enableValidationLayers = true;
-	const std::vector <const char*> validation_layers = {"VK_LAYER_KHRONOS_validation"};		// Validation layers for instance & device
+	const std::vector <const char*> validationLayers = {"VK_LAYER_KHRONOS_validation"};		// Validation layers for instance & device
 	std::vector <const char*> SDL_extensions{};													// SDL extensions
 	std::vector <const char*> deviceExtensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};			// Device extensions
 
@@ -79,10 +83,10 @@ private:
 public: // Delete 'public' later *
 	void initVulkan();						// Initialize Vulkan App
 	void deInitVulkan();					// DeInitialize Vulkan App
-	VkResult errorHandler(VkResult error);												// Error Handling for Vulkan results
+	VkResult errorHandler(VkResult error);	// Error Handling for Vulkan results
 	void createWindow();					// Initialize and setup SDL window
 	void createInstance();					// Initialize Vulkan Application instance
-	void checkSDLExtensions();			// Connect SDL Extensions to Vulkan Application
+	void checkSDLExtensions();				// Connect SDL Extensions to Vulkan Application
 	bool checkValidationLayers();			// Check for all Validation Layers
 
 	VkResult createDebugMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo,	// Instantiate Debugger Messenger Extension

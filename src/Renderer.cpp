@@ -24,11 +24,15 @@ void Renderer::initVulkan()
 	createSurface();
 	createPhysicalDevice();
 	createLogicalDevice();
+	createSwapChain();
 }
 
 
 void Renderer::deInitVulkan()
 {
+	// Destroy Swap Chain
+	vkDestroySwapchainKHR(device, swap_chain, nullptr);
+
 	// Destroy device
 	vkDestroyDevice(device, nullptr);
 	device = VK_NULL_HANDLE;
@@ -105,8 +109,8 @@ void Renderer::createInstance()
 	VkDebugUtilsMessengerCreateInfoEXT debug_create_info{};
 	if (enableValidationLayers)
 	{
-		create_info.enabledLayerCount = static_cast<uint32_t>(validation_layers.size());
-		create_info.ppEnabledLayerNames = validation_layers.data();
+		create_info.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
+		create_info.ppEnabledLayerNames = validationLayers.data();
 
 		insertDebugInfo(debug_create_info);
 		create_info.pNext = (VkDebugUtilsMessengerCreateInfoEXT*) &debug_create_info;
@@ -138,7 +142,7 @@ bool Renderer::checkValidationLayers()
 	bool layerFound = false;
 
 	// Check Validation Layers
-	for (const char* layerName : validation_layers)
+	for (const char* layerName : validationLayers)
 	{
 		layerFound = false;
 		// Iterate and Check through Layer Layers
@@ -395,8 +399,8 @@ void Renderer::createLogicalDevice()
 	// Validation Layer Support for Logical Device
 	if (enableValidationLayers)
 	{
-		device_create_info.enabledLayerCount = static_cast<uint32_t> (validation_layers.size());
-		device_create_info.ppEnabledLayerNames = validation_layers.data();
+		device_create_info.enabledLayerCount = static_cast<uint32_t> (validationLayers.size());
+		device_create_info.ppEnabledLayerNames = validationLayers.data();
 	}
 	else
 	{
@@ -515,6 +519,7 @@ void Renderer::createSwapChain()
 		image_count = swapChainProperties.extentCapabilities.maxImageCount;
 	}
 
+	// Create Swap Chain Info
 	VkSwapchainCreateInfoKHR createInfo{};
 	createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
 	createInfo.surface = surface;
@@ -525,6 +530,45 @@ void Renderer::createSwapChain()
 	createInfo.imageArrayLayers = 1;
 	createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
+	// Get Queue Family Index for Swap Chain
+	QueueFamilyIndices indices = queryQueueFamilies(physical_device);
+	uint32_t queueFamilyIndices[] = { indices.graphicsFamily, indices.presentFamily };
+
+	// Graphics and Present Family Error Checking
+	if (indices.graphicsFamily != indices.presentFamily)
+	{
+		createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+		createInfo.queueFamilyIndexCount = 2;							// [!] Might need to change later
+		createInfo.pQueueFamilyIndices = queueFamilyIndices;
+	}
+	else
+	{
+		createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		createInfo.queueFamilyIndexCount = 0;
+		createInfo.pQueueFamilyIndices = nullptr; 
+	}
+
+	// Set Swap Chain Property Info
+	createInfo.preTransform = swapChainProperties.extentCapabilities.currentTransform;
+	createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+	createInfo.presentMode = swapChainProperties.mode;
+	createInfo.clipped = VK_TRUE;
+	createInfo.oldSwapchain = VK_NULL_HANDLE;
+
+	// Swap Chain Creation Error Handling
+	if (errorHandler(vkCreateSwapchainKHR(device, &createInfo, nullptr, &swap_chain)) != VK_SUCCESS)
+	{
+		std::cout << "[!] Swap Chain Error - Failed to create Swap Chain.";
+		std::exit(-1);
+	}
+
+	// Retrieve Swap Chain Images
+	vkGetSwapchainImagesKHR(device, swap_chain, &image_count, nullptr);
+	swapChainImages.resize(image_count);
+	vkGetSwapchainImagesKHR(device, swap_chain, &image_count, swapChainImages.data());
+
+	swap_chain_image_format = swapChainProperties.format.format;
+	swap_chain_extent = swapChainProperties.extent;
 }
 
 
