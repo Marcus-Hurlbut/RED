@@ -13,11 +13,15 @@
 #include <algorithm>
 #include <cstdint>
 #include <iomanip>
+#include <fstream>
 
 
 
 #define WINDOW_WIDTH 400
 #define WINDOW_HEIGHT 400
+
+#define SHADER_VERT_FILE_DIR "shaders/vert.spv"
+#define SHADER_FRAG_FILE_DIR "shaders/frag.spv"
 
 
 class Renderer
@@ -34,7 +38,7 @@ private:
 	SDL_Window* window;
 	SDL_WindowFlags window_flags;
 
-	// Vulkan Application Setup components 
+	// Vulkan Setup Components 
 	VkInstance instance;										// Vulkan Instance
 	VkDebugUtilsMessengerEXT debug_messenger;					// Vulkan Debugger
 	VkPhysicalDevice physical_device = VK_NULL_HANDLE;			// Physical representation of GPU
@@ -51,6 +55,7 @@ private:
 	std::vector <VkImage> swapChainImages;						// Images in swap chain
 	VkFormat swap_chain_image_format;							// Format of swapchain
 	VkExtent2D swap_chain_extent;								// Extent / resolution
+	std::vector <VkImageView> swapChainImageViews;
 
 
 	// Validation Layers for Vulkan Elements
@@ -105,6 +110,11 @@ public: // Delete 'public' later *
 	void createSurface();																// Create Surface for graphics
 	void createSwapChain();																// Create Swap Chain for
 	SwapChainProperties querySwapChainProp(VkPhysicalDevice device);					// Query the Properties in Swap Chain
-	void setSwapChainProp(SwapChainProperties& swapChainProperties);
+	void setSwapChainProp(SwapChainProperties& swapChainProperties);					// Fill SwapChain Properties
+	void createImageViews();
 
+
+	bool readFile(std::string fileName, std::vector<char> &buffer);						// Reads in Files
+	VkShaderModule createShaderModule(std::vector<char> &buffer);						// Create Module from Shader Files
+	void createGraphicsPipeline();														// Graphics Pipeline for Rendering
 };

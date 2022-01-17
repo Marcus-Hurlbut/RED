@@ -25,11 +25,19 @@ void Renderer::initVulkan()
 	createPhysicalDevice();
 	createLogicalDevice();
 	createSwapChain();
+	createImageViews();
+	createGraphicsPipeline();
 }
 
 
 void Renderer::deInitVulkan()
 {
+	// Destroy Image Views
+	for (auto imageView : swapChainImageViews) 
+	{
+		vkDestroyImageView(device, imageView, nullptr);
+	}
+
 	// Destroy Swap Chain
 	vkDestroySwapchainKHR(device, swap_chain, nullptr);
 
@@ -368,7 +376,6 @@ void Renderer::validatePhysicalDevice(bool& suitable, VkPhysicalDevice device)
 void Renderer::createLogicalDevice()
 {
 	QueueFamilyIndices indices = queryQueueFamilies(physical_device);
-
 	std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
 	std::set<uint32_t> uniqueQueueFamilies = { indices.graphicsFamily, indices.presentFamily };
 	float queue_priority[]{ 1.0f };
@@ -432,7 +439,7 @@ void Renderer::createSurface()
 }
 
 
-
+// Retrieve Swap Chain Property Info
 Renderer::SwapChainProperties Renderer::querySwapChainProp(VkPhysicalDevice device)
 {
 	SwapChainProperties properties;
@@ -571,6 +578,113 @@ void Renderer::createSwapChain()
 	swap_chain_extent = swapChainProperties.extent;
 }
 
+
+void Renderer::createImageViews()
+{
+	swapChainImageViews.resize(swapChainImages.size());
+
+	for (size_t i = 0; i < swapChainImages.size(); i++) 
+	{
+		VkImageViewCreateInfo createInfo{};
+		createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+		createInfo.image = swapChainImages[i];
+		createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+		createInfo.format = swap_chain_image_format;
+		createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+		createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+		createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+		createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+		createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		createInfo.subresourceRange.baseMipLevel = 0;
+		createInfo.subresourceRange.levelCount = 1;
+		createInfo.subresourceRange.baseArrayLayer = 0;
+		createInfo.subresourceRange.layerCount = 1;
+
+		if (errorHandler(vkCreateImageView(device, &createInfo, nullptr, &swapChainImageViews[i])) != VK_SUCCESS) 
+		{
+			std::cout << "failed to create image views!";
+			std::exit(-1);
+		}
+	}
+
+}
+
+
+VkShaderModule Renderer::createShaderModule(std::vector<char> &buffer)
+{
+	VkShaderModule shaderModule;
+	VkShaderModuleCreateInfo create_info{};
+	create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	create_info.codeSize = buffer.size();
+	create_info.pCode = reinterpret_cast<const uint32_t*> (buffer.data());
+
+	if (errorHandler(vkCreateShaderModule(device, &create_info, nullptr, &shaderModule)) != VK_SUCCESS)
+	{
+		std::cout << "[!] Shader Module Error - Unable to create Shader module.";
+		std::exit(-1);
+	}
+	return shaderModule;
+}
+
+
+void Renderer::createGraphicsPipeline()
+{
+	// Get Shader Vertices & Fragment from Buffer
+	std::vector<char> shaderVert;
+	std::vector<char> shaderFrag;
+	if (!readFile(SHADER_VERT_FILE_DIR, shaderVert) || !readFile(SHADER_FRAG_FILE_DIR, shaderFrag))
+	{
+		throw std::runtime_error("Failed to read file");
+		std::exit(-1);
+	}
+
+	// Create Shader Module
+	auto shaderVertModule = createShaderModule(shaderVert);
+	auto shaderFragModule = createShaderModule(shaderFrag);
+
+	// Create Shader Vertices Stage
+	VkPipelineShaderStageCreateInfo vert_create_info {};
+	vert_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	vert_create_info.stage = VK_SHADER_STAGE_VERTEX_BIT;
+	vert_create_info.module = shaderVertModule;
+	vert_create_info.pName = "main";
+
+	// Create Shader Fragment Stage
+	VkPipelineShaderStageCreateInfo frag_create_info{};
+	frag_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	frag_create_info.stage = VK_SHADER_STAGE_VERTEX_BIT;
+	frag_create_info.module = shaderFragModule;
+	frag_create_info.pName = "main";
+
+	// Create Shader Stages
+	VkPipelineShaderStageCreateInfo stages[] = { vert_create_info, frag_create_info };
+
+	// Destroy Shader Module 
+	vkDestroyShaderModule(device, shaderFragModule, nullptr);
+	vkDestroyShaderModule(device, shaderVertModule, nullptr);
+
+}
+
+
+bool Renderer::readFile(std::string fileName, std::vector<char>& buffer)
+{
+	std::ifstream file(fileName, std::ios::ate | std::ios::binary);
+
+	if (!file.is_open()) 
+	{
+		std::cout << "[!] File Error - failed to open and read in file: " << fileName;
+		return false;
+	}
+
+	size_t fileSize = (size_t)file.tellg();
+	buffer.resize(fileSize);
+
+	file.seekg(0);
+	file.read(buffer.data(), fileSize);
+	file.close();
+
+	return true;
+}
 
 // Handle Vulkan Result Errors
 VkResult Renderer::errorHandler(VkResult error)
