@@ -1,8 +1,14 @@
+// Marcus Hurlbut - Vulkan Renderer
+
 #pragma once
 
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_vulkan.h>
 #include <vulkan/vulkan.h>
+#include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
+#define VK_USE_PLATFORM_WIN32_KHR
+#define GLFW_INCLUDE_VULKAN
+#define GLFW_EXPOSE_NATIVE_WIN32
+
 #include <assert.h>
 #include <cstdlib>
 #include <iostream>
@@ -17,11 +23,13 @@
 
 
 
-#define WINDOW_WIDTH 400
-#define WINDOW_HEIGHT 400
+#define WINDOW_WIDTH 800
+#define WINDOW_HEIGHT 600
 
-#define SHADER_VERT_FILE_DIR "shaders/vert.spv"
-#define SHADER_FRAG_FILE_DIR "shaders/frag.spv"
+#define CLAMP(x, lo, hi)    ((x) < (lo) ? (lo) : (x) > (hi) ? (hi) : (x))
+
+#define SHADER_VERT_FILE_DIR "/src/shaders/vert.spv"
+#define SHADER_FRAG_FILE_DIR "/src/shaders/frag.spv"
 
 
 class Renderer
@@ -35,8 +43,9 @@ private:
 	bool debug_mode = true;
 
 	// SDL Window
-	SDL_Window* window;
-	SDL_WindowFlags window_flags;
+	GLFWwindow* window;
+	//SDL_WindowFlags window_flags;
+	//SDL_Event event;
 
 	// Vulkan Setup Components 
 	VkInstance instance;										// Vulkan Instance
@@ -49,19 +58,33 @@ private:
 	uint32_t present_family_index = 0;
 	VkDebugReportCallbackEXT debug_report = VK_NULL_HANDLE;		// Debugger callback report
 
+
 	// Vulkan Presentation Components
 	VkSurfaceKHR surface;										// Window Surface
 	VkSwapchainKHR swap_chain = VK_NULL_HANDLE;					// Swap Chain
-	std::vector <VkImage> swapChainImages;						// Images in swap chain
 	VkFormat swap_chain_image_format;							// Format of swapchain
 	VkExtent2D swap_chain_extent;								// Extent / resolution
-	std::vector <VkImageView> swapChainImageViews;
+	VkPipelineLayout pipelineLayout;							// Pipeline for rendering
+	VkPipeline graphicsPipeline;
+	VkRenderPass render_pass;									// Renderer Pass
+	VkCommandPool commandPool;									// Command pool
+	VkCommandBuffer commandBuffer;								// Command Buffer
+
+	// Vulkan Buffers
+	std::vector <VkImage> swapChainImages;						// Images in swap chain
+	std::vector <VkImageView> swapChainImageViews;				// Image views
+	std::vector <VkFramebuffer> swapChainFrameBuffers;			// Frame Buffesr
+
+	// Synchronization objects
+	VkSemaphore imageAvailableSemaphore;
+	VkSemaphore renderFinishedSemaphore;
+	VkFence inFlightFence;
 
 
-	// Validation Layers for Vulkan Elements
+	// Validation Layers for Vulkan Elementsdf
 	const bool enableValidationLayers = true;
 	const std::vector <const char*> validationLayers = {"VK_LAYER_KHRONOS_validation"};		// Validation layers for instance & device
-	std::vector <const char*> SDL_extensions{};													// SDL extensions
+	//std::vector <const char*> SDL_extensions{};													// SDL extensions
 	std::vector <const char*> deviceExtensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};			// Device extensions
 
 	// Queue Family Indices for Physical Device
@@ -88,10 +111,12 @@ private:
 public: // Delete 'public' later *
 	void initVulkan();						// Initialize Vulkan App
 	void deInitVulkan();					// DeInitialize Vulkan App
+	void eventHandler();					// Main loop for application
+
 	VkResult errorHandler(VkResult error);	// Error Handling for Vulkan results
 	void createWindow();					// Initialize and setup SDL window
 	void createInstance();					// Initialize Vulkan Application instance
-	void checkSDLExtensions();				// Connect SDL Extensions to Vulkan Application
+	std::vector<const char*> checkSDLExtensions();				// Connect SDL Extensions to Vulkan Application
 	bool checkValidationLayers();			// Check for all Validation Layers
 
 	VkResult createDebugMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo,	// Instantiate Debugger Messenger Extension
@@ -114,7 +139,15 @@ public: // Delete 'public' later *
 	void createImageViews();
 
 
-	bool readFile(std::string fileName, std::vector<char> &buffer);						// Reads in Files
+	std::vector<char> readFile(const std::string &fileName);						// Reads in Files
 	VkShaderModule createShaderModule(std::vector<char> &buffer);						// Create Module from Shader Files
 	void createGraphicsPipeline();														// Graphics Pipeline for Rendering
+	void createRenderPass();															// Create the Renderpass for Frame bufers
+	void createFrameBuffers();															// Create Frame Buffers for Rendering
+	void createCommandPool();
+	void createCommandBuffer();															// Create Command Buffer
+	void writeCommandBuffer(VkCommandBuffer command_buffer, uint32_t image_index);		// Writes to Command buffers
+
+	void createSyncObjects();
+	void drawFrame();																	// Draws each Frame
 };
